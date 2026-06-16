@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>模型回复自动评测</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f0f2f5; min-height: 100vh;
+      display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px;
+    }
+    .card {
+      background: #fff; border-radius: 12px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+      padding: 36px 40px; width: 100%; max-width: 680px;
+    }
+    h1 { font-size: 22px; font-weight: 700; color: #1a1a1a; margin-bottom: 6px; }
+    .subtitle { font-size: 13px; color: #888; margin-bottom: 32px; }
+    .section-title {
+      font-size: 13px; font-weight: 600; color: #555;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 14px; margin-top: 28px;
+      padding-bottom: 6px; border-bottom: 1px solid #eee;
+    }
+    .form-row { display: flex; gap: 12px; margin-bottom: 14px; }
+    .form-group { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    label { font-size: 13px; font-weight: 500; color: #333; }
+    label .hint { font-weight: 400; color: #aaa; font-size: 12px; margin-left: 4px; }
+    input[type="text"], input[type="password"], input[type="number"], textarea {
+      border: 1px solid #ddd; border-radius: 8px; padding: 9px 12px;
+      font-size: 14px; color: #222; outline: none; transition: border-color 0.2s; width: 100%;
+    }
+    input:focus, textarea:focus { border-color: #4f6ef7; box-shadow: 0 0 0 3px rgba(79,110,247,0.1); }
+    textarea {
+      resize: vertical; min-height: 130px;
+      font-family: "Menlo", "Consolas", monospace; font-size: 12px; line-height: 1.6;
+    }
+    .upload-area {
+      border: 2px dashed #d0d7e3; border-radius: 8px; padding: 20px;
+      text-align: center; cursor: pointer; transition: all 0.2s;
+      background: #fafbff; position: relative;
+    }
+    .upload-area:hover, .upload-area.dragover { border-color: #4f6ef7; background: #f0f3ff; }
+    .upload-area input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .upload-icon { font-size: 28px; margin-bottom: 6px; }
+    .upload-text { font-size: 13px; color: #666; }
+    .upload-text strong { color: #4f6ef7; }
+    .upload-filename { margin-top: 8px; font-size: 12px; color: #4f6ef7; font-weight: 500; }
+    .divider { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: #bbb; font-size: 12px; }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: #eee; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 11px 28px; border-radius: 8px;
+      font-size: 15px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s;
+    }
+    .btn-primary { background: #4f6ef7; color: #fff; width: 100%; margin-top: 28px; }
+    .btn-primary:hover { background: #3a5ae8; }
+    .btn-primary:disabled { background: #a0b0f0; cursor: not-allowed; }
+    .btn-download { background: #18c16e; color: #fff; padding: 10px 24px; font-size: 14px; }
+    .btn-download:hover { background: #12a85e; }
+    #progress-section {
+      display: none; margin-top: 28px; padding: 20px;
+      background: #f7f8ff; border-radius: 10px; border: 1px solid #e0e6ff;
+    }
+    .progress-bar-wrap { background: #e8ecff; border-radius: 99px; height: 10px; margin: 12px 0 8px; overflow: hidden; }
+    .progress-bar-fill {
+      height: 100%; background: linear-gradient(90deg, #4f6ef7, #7b9fff);
+      border-radius: 99px; transition: width 0.4s ease; width: 0%;
+    }
+    .progress-msg { font-size: 13px; color: #555; }
+    .progress-pct { font-size: 13px; font-weight: 700; color: #4f6ef7; float: right; }
+    #status-label { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .status-running { color: #4f6ef7; }
+    .status-done { color: #18c16e; }
+    .status-error { color: #e84040; }
+    #download-area { display: none; margin-top: 16px; text-align: center; }
+    .error-box {
+      background: #fff2f2; border: 1px solid #fcc; border-radius: 8px;
+      padding: 12px 16px; font-size: 13px; color: #c00; margin-top: 12px; display: none;
+    }
+    .tip { font-size: 12px; color: #aaa; margin-top: 5px; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>🤖 模型回复自动评测</h1>
+  <p class="subtitle">上传数据文件和提示词，自动完成两两对比评测并下载结果</p>
+
+  <div class="section-title">模型配置</div>
+  <div class="form-row">
+    <div class="form-group">
+      <label>模型名称</label>
+      <input type="text" id="model" placeholder="例：deepseek-r1" value="deepseek-r1"/>
+    </div>
+    <div class="form-group">
+      <label>并发数 <span class="hint">（同时跑几个任务）</span></label>
+      <input type="number" id="concurrency" value="5" min="1" max="20"/>
+    </div>
+  </div>
+  <div class="form-group" style="margin-bottom:14px">
+    <label>API Key</label>
+    <input type="password" id="api_key" placeholder="sk-xxxxxxxxxxxxxxxx"/>
+  </div>
+  <div class="form-group">
+    <label>Base URL <span class="hint">（选填，默认 DashScope）</span></label>
+    <input type="text" id="base_url" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1/"/>
+    <p class="tip">使用阿里云 DashScope 留空即可</p>
+  </div>
+
+  <div class="section-title">上传数据文件</div>
+  <div class="upload-area" id="input-area">
+    <input type="file" id="input_file" accept=".xlsx,.xls" onchange="showFilename(this,'input-name')"/>
+    <div class="upload-icon">📊</div>
+    <div class="upload-text">点击或拖拽上传 <strong>数据文件</strong>（.xlsx）</div>
+    <div class="upload-filename" id="input-name"></div>
+  </div>
+  <p class="tip" style="margin-top:6px">需包含「System」「对话历史」「回复1」「回复2」等列，回复列自动识别</p>
+
+  <div class="section-title">提示词</div>
+  <div class="upload-area" id="prompt-area">
+    <input type="file" id="prompt_file" accept=".xlsx,.xls" onchange="showFilename(this,'prompt-name')"/>
+    <div class="upload-icon">📄</div>
+    <div class="upload-text">点击上传 <strong>提示词文件</strong>（.xlsx，需含 prompt 列）</div>
+    <div class="upload-filename" id="prompt-name"></div>
+  </div>
+  <div class="divider">或者直接粘贴提示词</div>
+  <textarea id="prompt_text" placeholder="把提示词直接粘贴在这里，和上传文件二选一即可"></textarea>
+
+  <button class="btn btn-primary" id="start-btn" onclick="startTask()">🚀 开始评测</button>
+
+  <div id="progress-section">
+    <div id="status-label">准备中...</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progress-bar"></div>
+    </div>
+    <span class="progress-msg" id="progress-msg">等待任务启动</span>
+    <span class="progress-pct" id="progress-pct">0%</span>
+    <div id="download-area">
+      <button class="btn btn-download" onclick="downloadResult()">⬇️ 下载结果文件</button>
+    </div>
+    <div class="error-box" id="error-box"></div>
+  </div>
+</div>
+
+<script>
+  let currentTaskId = null;
+
+  function showFilename(input, targetId) {
+    document.getElementById(targetId).textContent =
+      input.files[0] ? "✅ 已选择：" + input.files[0].name : "";
+  }
+
+  ["input-area","prompt-area"].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("dragover"); });
+    el.addEventListener("dragleave", () => el.classList.remove("dragover"));
+    el.addEventListener("drop", e => { e.preventDefault(); el.classList.remove("dragover"); });
+  });
+
+  async function startTask() {
+    const model       = document.getElementById("model").value.trim();
+    const api_key     = document.getElementById("api_key").value.trim();
+    const base_url    = document.getElementById("base_url").value.trim();
+    const concurrency = document.getElementById("concurrency").value;
+    const input_file  = document.getElementById("input_file").files[0];
+    const prompt_file = document.getElementById("prompt_file").files[0];
+    const prompt_text = document.getElementById("prompt_text").value.trim();
+
+    if (!model)      return alert("请填写模型名称");
+    if (!api_key)    return alert("请填写 API Key");
+    if (!input_file) return alert("请上传数据文件");
+    if (!prompt_file && !prompt_text) return alert("请上传提示词文件或粘贴提示词");
+
+    const fd = new FormData();
+    fd.append("model", model);
+    fd.append("api_key", api_key);
+    fd.append("base_url", base_url);
+    fd.append("concurrency", concurrency);
+    fd.append("input_file", input_file);
+    if (prompt_file) fd.append("prompt_file", prompt_file);
+    if (prompt_text) fd.append("prompt_text", prompt_text);
+
+    document.getElementById("start-btn").disabled = true;
+    document.getElementById("start-btn").textContent = "⏳ 提交中...";
+    document.getElementById("progress-section").style.display = "block";
+    document.getElementById("download-area").style.display = "none";
+    document.getElementById("error-box").style.display = "none";
+    setStatus("running", "正在提交任务...");
+
+    try {
+      const resp = await fetch("/api/start", { method: "POST", body: fd });
+      const data = await resp.json();
+      if (!resp.ok || data.error) { showError(data.error || "提交失败"); resetBtn(); return; }
+      currentTaskId = data.task_id;
+      pollStatus();
+    } catch(e) { showError("网络错误：" + e.message); resetBtn(); }
+  }
+
+  function pollStatus() {
+    setTimeout(async () => {
+      try {
+        const resp = await fetch(`/api/status/${currentTaskId}`);
+        const data = await resp.json();
+        const pct = data.progress || 0;
+        document.getElementById("progress-bar").style.width = pct + "%";
+        document.getElementById("progress-pct").textContent = pct + "%";
+        document.getElementById("progress-msg").textContent = data.message || "";
+        if (data.status === "done") {
+          setStatus("done", "✅ 评测完成！");
+          document.getElementById("download-area").style.display = "block";
+          resetBtn();
+        } else if (data.status === "error") {
+          showError(data.message); setStatus("error", "❌ 评测出错"); resetBtn();
+        } else {
+          setStatus("running", "⏳ 评测进行中..."); pollStatus();
+        }
+      } catch(e) { showError("轮询失败：" + e.message); resetBtn(); }
+    }, 1500);
+  }
+
+  function downloadResult() {
+    if (currentTaskId) window.location.href = `/api/download/${currentTaskId}`;
+  }
+
+  function setStatus(type, text) {
+    const el = document.getElementById("status-label");
+    el.textContent = text; el.className = "status-" + type;
+  }
+
+  function showError(msg) {
+    const el = document.getElementById("error-box");
+    el.textContent = msg; el.style.display = "block";
+  }
+
+  function resetBtn() {
+    const btn = document.getElementById("start-btn");
+    btn.disabled = false; btn.textContent = "🚀 开始评测";
+  }
+</script>
+</body>
+</html>
